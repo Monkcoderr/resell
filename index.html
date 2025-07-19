@@ -21,6 +21,37 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- XLSX.js library for Excel export -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+        import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDnndrkMcViNw78xjFUZiMZC99fLA25N-4",
+            authDomain: "my-inventory-app-f48a2.firebaseapp.com",
+            projectId: "my-inventory-app-f48a2",
+            storageBucket: "my-inventory-app-f48a2.firebasestorage.app",
+            messagingSenderId: "180271056079",
+            appId: "1:180271056079:web:4e0d0b025771dbf174e3ba"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // Make Firebase available globally
+        window.firebaseDB = db;
+        window.firebaseUtils = {
+            collection,
+            addDoc,
+            getDocs,
+            deleteDoc,
+            doc,
+            updateDoc,
+            query,
+            orderBy
+        };
+    </script>
     <style>
         /* Custom styles for better mobile experience */
         .image-preview {
@@ -194,8 +225,15 @@
                 <!-- Mobile cards will be inserted here -->
             </div>
             
+            <!-- Loading State -->
+            <div id="loadingState" class="text-center py-8 text-gray-500">
+                <div class="text-4xl mb-4">⏳</div>
+                <p class="text-lg">Loading inventory...</p>
+                <p class="text-sm">Connecting to database</p>
+            </div>
+
             <!-- Empty State -->
-            <div id="emptyState" class="text-center py-8 text-gray-500">
+            <div id="emptyState" class="hidden text-center py-8 text-gray-500">
                 <div class="text-6xl mb-4">📱</div>
                 <p class="text-lg">No mobiles in inventory yet</p>
                 <p class="text-sm">Add your first mobile above!</p>

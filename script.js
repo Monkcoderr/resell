@@ -1,18 +1,43 @@
 // Mobile Inventory Manager JavaScript
 class MobileInventoryManager {
     constructor() {
-        this.storageKey = 'mobileInventory';
-        this.inventory = this.loadInventory();
+        this.collectionName = 'mobiles';
+        this.inventory = [];
         this.isEditing = false;
         this.editingId = null;
         this.initializeApp();
     }
 
     // Initialize the application
-    initializeApp() {
+    async initializeApp() {
+        // Wait for Firebase to be ready
+        await this.waitForFirebase();
+        
         this.bindEventListeners();
+        
+        // Show loading state
+        const loadingState = document.getElementById('loadingState');
+        if (loadingState) {
+            loadingState.classList.remove('hidden');
+        }
+        
+        await this.loadInventory();
         this.displayInventory();
         this.updateInventoryCount();
+    }
+
+    // Wait for Firebase to be initialized
+    waitForFirebase() {
+        return new Promise((resolve) => {
+            const checkFirebase = () => {
+                if (window.firebaseDB && window.firebaseUtils) {
+                    resolve();
+                } else {
+                    setTimeout(checkFirebase, 100);
+                }
+            };
+            checkFirebase();
+        });
     }
 
     // Bind event listeners
@@ -57,25 +82,32 @@ class MobileInventoryManager {
         navSearchInventory.addEventListener('click', () => this.showPage('searchInventory'));
     }
 
-    // Load inventory from LocalStorage
-    loadInventory() {
+    // Load inventory from Firestore
+    async loadInventory() {
         try {
-            const stored = localStorage.getItem(this.storageKey);
-            return stored ? JSON.parse(stored) : [];
+            const { collection, getDocs, query, orderBy } = window.firebaseUtils;
+            const mobilesRef = collection(window.firebaseDB, this.collectionName);
+            const q = query(mobilesRef, orderBy('createdAt', 'desc'));
+            const querySnapshot = await getDocs(q);
+            
+            this.inventory = [];
+            querySnapshot.forEach((doc) => {
+                const data = doc.data();
+                this.inventory.push({
+                    id: doc.id, // Use Firestore document ID
+                    ...data
+                });
+            });
         } catch (error) {
             console.error('Error loading inventory:', error);
-            return [];
+            this.showError('Failed to load inventory from database.');
         }
     }
 
-    // Save inventory to LocalStorage
-    saveInventory() {
-        try {
-            localStorage.setItem(this.storageKey, JSON.stringify(this.inventory));
-        } catch (error) {
-            console.error('Error saving inventory:', error);
-            this.showError('Failed to save data. Storage might be full.');
-        }
+    // Save inventory is now handled individually through addMobile, updateMobile, deleteMobile
+    async saveInventory() {
+        // This method is kept for compatibility but not used with Firestore
+        console.log('saveInventory() called - using individual Firestore operations instead');
     }
 
     // Validate IMEI input (only allow numbers)
@@ -146,21 +178,35 @@ class MobileInventoryManager {
 
         // Add or update mobile
         if (this.isEditing) {
-            this.updateMobile(this.editingId, mobileData);
-            this.showSuccess('Mobile updated successfully!');
-            // Navigate back to inventory after successful edit
-            setTimeout(() => {
-                this.showPage('searchInventory');
-            }, 1000);
+            try {
+                await this.updateMobile(this.editingId, mobileData);
+                this.showSuccess('Mobile updated successfully!');
+                // Navigate back to inventory after successful edit
+                setTimeout(() => {
+                    this.showPage('searchInventory');
+                }, 1000);
+            } catch (error) {
+                this.showError('Failed to update mobile.');
+                return;
+            }
         } else {
-            const addedMobile = this.addMobile(mobileData);
-            this.showSuccess('Mobile added to inventory successfully!');
-            // Show Tag ID popup
-            this.showTagIdPopup(addedMobile.tagId);
-            // Navigate to inventory after successful add
-            setTimeout(() => {
-                this.showPage('searchInventory');
-            }, 2000); // Slightly longer delay to show popup
+            try {
+                const addedMobile = await this.addMobile(mobileData);
+                if (addedMobile) {
+                    this.showSuccess('Mobile added to inventory successfully!');
+                    // Show Tag ID popup
+                    this.showTagIdPopup(addedMobile.tagId);
+                    // Navigate to inventory after successful add
+                    setTimeout(() => {
+                        this.showPage('searchInventory');
+                    }, 2000); // Slightly longer delay to show popup
+                } else {
+                    return; // Error already shown by addMobile
+                }
+            } catch (error) {
+                this.showError('Failed to add mobile.');
+                return;
+            }
         }
         
         // Reset form and hide preview
@@ -242,29 +288,55 @@ class MobileInventoryManager {
     }
 
     // Add mobile to inventory
-    addMobile(mobileData) {
-        const mobile = {
-            id: Date.now(), // Simple ID generation using timestamp
-            tagId: this.generateUniqueTagId(), // Auto-generate unique Tag ID
-            ...mobileData
-        };
+    async addMobile(mobileData) {
+        try {
+            const { collection, addDoc } = window.firebaseUtils;
+            
+            const mobile = {
+                tagId: this.generateUniqueTagId(), // Auto-generate unique Tag ID
+                createdAt: Date.now(), // Timestamp for ordering
+                ...mobileData
+            };
 
-        this.inventory.push(mobile);
-        this.saveInventory();
-        this.displayInventory();
-        this.updateInventoryCount();
-        
-        return mobile; // Return the added mobile object
+            // Add to Firestore
+            const docRef = await addDoc(collection(window.firebaseDB, this.collectionName), mobile);
+            
+            // Add to local inventory with Firestore document ID
+            const addedMobile = {
+                id: docRef.id,
+                ...mobile
+            };
+            
+            this.inventory.unshift(addedMobile); // Add to beginning (newest first)
+            this.displayInventory();
+            this.updateInventoryCount();
+            
+            return addedMobile; // Return the added mobile object
+        } catch (error) {
+            console.error('Error adding mobile:', error);
+            this.showError('Failed to add mobile to database.');
+            return null;
+        }
     }
 
     // Delete mobile from inventory
-    deleteMobile(id) {
+    async deleteMobile(id) {
         if (confirm('Are you sure you want to delete this mobile from inventory?')) {
-            this.inventory = this.inventory.filter(mobile => mobile.id !== id);
-            this.saveInventory();
-            this.displayInventory();
-            this.updateInventoryCount();
-            this.showSuccess('Mobile deleted from inventory.');
+            try {
+                const { deleteDoc, doc } = window.firebaseUtils;
+                
+                // Delete from Firestore
+                await deleteDoc(doc(window.firebaseDB, this.collectionName, id));
+                
+                // Remove from local inventory
+                this.inventory = this.inventory.filter(mobile => mobile.id !== id);
+                this.displayInventory();
+                this.updateInventoryCount();
+                this.showSuccess('Mobile deleted from inventory.');
+            } catch (error) {
+                console.error('Error deleting mobile:', error);
+                this.showError('Failed to delete mobile from database.');
+            }
         }
     }
 
@@ -272,7 +344,11 @@ class MobileInventoryManager {
     displayInventory() {
         const inventoryList = document.getElementById('inventoryList');
         const emptyState = document.getElementById('emptyState');
+        const loadingState = document.getElementById('loadingState');
         const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+
+        // Hide loading state
+        loadingState.classList.add('hidden');
 
         // Filter inventory based on search term
         let filteredInventory = this.inventory;
@@ -498,25 +574,25 @@ class MobileInventoryManager {
         
         // Delete buttons
         inventoryList.querySelectorAll('.delete-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const id = parseInt(e.target.dataset.id);
-                this.deleteMobile(id);
+            btn.addEventListener('click', async (e) => {
+                const id = e.target.dataset.id; // Use string ID for Firestore
+                await this.deleteMobile(id);
             });
         });
 
         // Edit buttons
         inventoryList.querySelectorAll('.edit-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                const id = parseInt(e.target.dataset.id);
+                const id = e.target.dataset.id; // Use string ID for Firestore
                 this.editMobile(id);
             });
         });
 
         // Mark as sold buttons
         inventoryList.querySelectorAll('.sold-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const id = parseInt(e.target.dataset.id);
-                this.markAsSold(id);
+            btn.addEventListener('click', async (e) => {
+                const id = e.target.dataset.id; // Use string ID for Firestore
+                await this.markAsSold(id);
             });
         });
     }
@@ -576,18 +652,27 @@ class MobileInventoryManager {
     }
 
     // Update mobile in inventory
-    updateMobile(id, updatedData) {
-        const index = this.inventory.findIndex(m => m.id === id);
-        if (index !== -1) {
-            // Preserve existing data and update with new data
-            this.inventory[index] = { 
-                ...this.inventory[index], 
-                ...updatedData,
-                id // Preserve original ID
-            };
-            this.saveInventory();
-            this.displayInventory();
-            this.updateInventoryCount();
+    async updateMobile(id, updatedData) {
+        try {
+            const { updateDoc, doc } = window.firebaseUtils;
+            
+            // Update in Firestore
+            await updateDoc(doc(window.firebaseDB, this.collectionName, id), updatedData);
+            
+            // Update in local inventory
+            const index = this.inventory.findIndex(m => m.id === id);
+            if (index !== -1) {
+                this.inventory[index] = { 
+                    ...this.inventory[index], 
+                    ...updatedData,
+                    id // Preserve original ID
+                };
+                this.displayInventory();
+                this.updateInventoryCount();
+            }
+        } catch (error) {
+            console.error('Error updating mobile:', error);
+            this.showError('Failed to update mobile in database.');
         }
     }
 
@@ -623,14 +708,14 @@ class MobileInventoryManager {
     }
 
     // Mark mobile as sold
-    markAsSold(id) {
+    async markAsSold(id) {
         if (confirm('Mark this mobile as sold?')) {
-            const mobile = this.inventory.find(m => m.id === id);
-            if (mobile) {
-                mobile.sold = true;
-                this.saveInventory();
-                this.displayInventory();
+            try {
+                await this.updateMobile(id, { sold: true });
                 this.showSuccess('Mobile marked as sold!');
+            } catch (error) {
+                console.error('Error marking mobile as sold:', error);
+                this.showError('Failed to mark mobile as sold.');
             }
         }
     }
@@ -719,7 +804,7 @@ class MobileInventoryManager {
     }
 
     // Generate test data for development/testing
-    generateTestData() {
+    async generateTestData() {
         if (confirm('This will add sample mobile inventory data. Continue?')) {
             const testMobiles = [
                 {
@@ -905,19 +990,24 @@ class MobileInventoryManager {
             ];
 
             // Add test mobiles to inventory
-            testMobiles.forEach(mobile => {
-                // Check if IMEI already exists to avoid duplicates
-                if (!this.isDuplicateIMEI(mobile.imei)) {
-                    this.inventory.push(mobile);
+            try {
+                let addedCount = 0;
+                for (const mobileData of testMobiles) {
+                    // Check if IMEI already exists to avoid duplicates
+                    if (!this.isDuplicateIMEI(mobileData.imei)) {
+                        const { tagId, createdAt, ...cleanData } = mobileData; // Remove auto-generated fields
+                        const addedMobile = await this.addMobile(cleanData);
+                        if (addedMobile) {
+                            addedCount++;
+                        }
+                    }
                 }
-            });
-
-            // Save to localStorage and refresh display
-            this.saveInventory();
-            this.displayInventory();
-            this.updateInventoryCount();
-            
-            this.showSuccess(`Generated ${testMobiles.length} test mobiles in inventory!`);
+                
+                this.showSuccess(`Generated ${addedCount} test mobiles in inventory!`);
+            } catch (error) {
+                console.error('Error generating test data:', error);
+                this.showError('Failed to generate test data.');
+            }
         }
     }
 }
