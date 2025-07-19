@@ -153,12 +153,14 @@ class MobileInventoryManager {
                 this.showPage('searchInventory');
             }, 1000);
         } else {
-            this.addMobile(mobileData);
+            const addedMobile = this.addMobile(mobileData);
             this.showSuccess('Mobile added to inventory successfully!');
+            // Show Tag ID popup
+            this.showTagIdPopup(addedMobile.tagId);
             // Navigate to inventory after successful add
             setTimeout(() => {
                 this.showPage('searchInventory');
-            }, 1000);
+            }, 2000); // Slightly longer delay to show popup
         }
         
         // Reset form and hide preview
@@ -185,8 +187,8 @@ class MobileInventoryManager {
         const maxAttempts = 1000; // Prevent infinite loop
         
         do {
-            // Generate random 6-digit number (100000 to 999999)
-            tagId = Math.floor(Math.random() * 900000) + 100000;
+            // Generate random 6-digit number using the specified formula
+            tagId = Math.floor(100000 + Math.random() * 900000);
             attempts++;
         } while (this.isTagIdExists(tagId) && attempts < maxAttempts);
         
@@ -251,6 +253,8 @@ class MobileInventoryManager {
         this.saveInventory();
         this.displayInventory();
         this.updateInventoryCount();
+        
+        return mobile; // Return the added mobile object
     }
 
     // Delete mobile from inventory
@@ -342,7 +346,10 @@ class MobileInventoryManager {
                     <div class="flex justify-between items-start">
                         <div>
                             <h3 class="font-semibold text-lg text-gray-800">${mobile.brand} ${mobile.model}</h3>
-                            ${isSold ? '<span class="inline-block bg-red-100 text-red-800 text-xs px-2 py-1 rounded-full font-semibold mt-1">SOLD</span>' : ''}
+                            <div class="flex items-center gap-2 mt-1">
+                                <span class="text-sm text-gray-500 font-mono">#${mobile.tagId || 'N/A'}</span>
+                                ${isSold ? '<span class="inline-block bg-red-100 text-red-800 text-xs px-2 py-1 rounded-full font-semibold">SOLD</span>' : ''}
+                            </div>
                         </div>
                         ${actionButtons}
                     </div>
@@ -362,9 +369,6 @@ class MobileInventoryManager {
                     </div>
                     <div class="bg-green-50 p-2 rounded border border-green-200 text-sm">
                         <span class="text-green-600 font-semibold">Price: ₹${mobile.price ? mobile.price.toFixed(2) : 'N/A'}</span>
-                    </div>
-                    <div class="bg-blue-50 p-2 rounded border border-blue-200 text-sm">
-                        <span class="text-blue-600 font-semibold">Tag ID: ${mobile.tagId || 'N/A'}</span>
                     </div>
                 </div>
             </div>
@@ -411,6 +415,53 @@ class MobileInventoryManager {
                 successDiv.parentNode.removeChild(successDiv);
             }
         }, 3000);
+    }
+
+    // Show Tag ID popup after adding item
+    showTagIdPopup(tagId) {
+        // Create modal backdrop
+        const backdrop = document.createElement('div');
+        backdrop.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
+        
+        // Create modal content
+        const modal = document.createElement('div');
+        modal.className = 'bg-white rounded-lg p-6 max-w-sm w-full mx-auto shadow-xl';
+        
+        modal.innerHTML = `
+            <div class="text-center">
+                <div class="text-4xl mb-4">🎯</div>
+                <h3 class="text-xl font-bold text-gray-800 mb-2">Item Added Successfully!</h3>
+                <p class="text-gray-600 mb-4">Your Tag ID is:</p>
+                <div class="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 mb-4">
+                    <span class="text-2xl font-bold text-blue-600">#${tagId}</span>
+                </div>
+                <p class="text-sm text-gray-500 mb-4">Use this Tag ID to quickly find this item later</p>
+                <button id="closeTagIdModal" class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors">
+                    Got It!
+                </button>
+            </div>
+        `;
+        
+        backdrop.appendChild(modal);
+        document.body.appendChild(backdrop);
+        
+        // Close modal functionality
+        const closeModal = () => {
+            document.body.removeChild(backdrop);
+        };
+        
+        // Close on button click
+        document.getElementById('closeTagIdModal').addEventListener('click', closeModal);
+        
+        // Close on backdrop click
+        backdrop.addEventListener('click', (e) => {
+            if (e.target === backdrop) {
+                closeModal();
+            }
+        });
+        
+        // Auto-close after 5 seconds
+        setTimeout(closeModal, 5000);
     }
 
     // ============= NEW FEATURES =============
