@@ -13,6 +13,13 @@ class MobileInventoryManager {
         // Wait for Firebase to be ready
         await this.waitForFirebase();
         
+        // Clear any old localStorage data since we're using Firestore now
+        const oldStorageKey = 'mobileInventory';
+        if (localStorage.getItem(oldStorageKey)) {
+            console.log('Clearing old localStorage data...'); // Debug log
+            localStorage.removeItem(oldStorageKey);
+        }
+        
         this.bindEventListeners();
         
         // Show loading state
@@ -85,19 +92,27 @@ class MobileInventoryManager {
     // Load inventory from Firestore
     async loadInventory() {
         try {
+            console.log('Loading inventory from Firestore...'); // Debug log
             const { collection, getDocs, query, orderBy } = window.firebaseUtils;
             const mobilesRef = collection(window.firebaseDB, this.collectionName);
             const q = query(mobilesRef, orderBy('createdAt', 'desc'));
             const querySnapshot = await getDocs(q);
             
+            console.log('Firestore query completed, documents found:', querySnapshot.size); // Debug log
+            
             this.inventory = [];
             querySnapshot.forEach((doc) => {
                 const data = doc.data();
-                this.inventory.push({
+                const mobile = {
                     id: doc.id, // Use Firestore document ID
                     ...data
-                });
+                };
+                console.log('Loading mobile with ID:', mobile.id, 'Brand:', mobile.brand); // Debug log
+                this.inventory.push(mobile);
             });
+            
+            console.log('Total mobiles loaded:', this.inventory.length); // Debug log
+            console.log('Sample mobile IDs:', this.inventory.slice(0, 3).map(m => m.id)); // Debug log
         } catch (error) {
             console.error('Error loading inventory:', error);
             this.showError('Failed to load inventory from database.');
@@ -321,22 +336,81 @@ class MobileInventoryManager {
 
     // Delete mobile from inventory
     async deleteMobile(id) {
+        console.log('deleteMobile called with ID:', id); // Debug log
+        console.log('ID type:', typeof id); // Debug log
+        console.log('Firebase DB available:', !!window.firebaseDB); // Debug log
+        console.log('Firebase utils available:', !!window.firebaseUtils); // Debug log
+        console.log('Collection name:', this.collectionName); // Debug log
+        
+        // Find the mobile in local inventory to verify it exists
+        const mobile = this.inventory.find(m => m.id === id);
+        console.log('Mobile found in local inventory:', !!mobile); // Debug log
+        if (mobile) {
+            console.log('Mobile details:', { brand: mobile.brand, model: mobile.model, tagId: mobile.tagId });
+        }
+        
         if (confirm('Are you sure you want to delete this mobile from inventory?')) {
             try {
                 const { deleteDoc, doc } = window.firebaseUtils;
                 
-                // Delete from Firestore
-                await deleteDoc(doc(window.firebaseDB, this.collectionName, id));
+                console.log('Creating document reference...'); // Debug log
+                const docRef = doc(window.firebaseDB, this.collectionName, id);
+                console.log('Document reference created:', docRef); // Debug log
                 
-                // Remove from local inventory
-                this.inventory = this.inventory.filter(mobile => mobile.id !== id);
+                console.log('Attempting to delete from Firestore...'); // Debug log
+                
+                // Delete from Firestore
+                const result = await deleteDoc(docRef);
+                
+                console.log('Firestore delete result:', result); // Debug log
+                console.log('Successfully deleted from Firestore'); // Debug log
+                
+                                        // Reload inventory from Firestore to ensure sync (handles ID mismatches)
+                console.log('Reloading inventory from Firestore to ensure sync...');
+                const beforeLength = this.inventory.length;
+                
+                await this.loadInventory();
+                
+                const afterLength = this.inventory.length;
+                console.log(`Local inventory: ${beforeLength} -> ${afterLength} items`); // Debug log
+                
                 this.displayInventory();
                 this.updateInventoryCount();
                 this.showSuccess('Mobile deleted from inventory.');
             } catch (error) {
-                console.error('Error deleting mobile:', error);
-                this.showError('Failed to delete mobile from database.');
+                console.error('Detailed error deleting mobile:', error);
+                console.error('Error name:', error.name);
+                console.error('Error message:', error.message);
+                console.error('Error code:', error.code);
+                
+                // Check if it's a permission error
+                if (error.code === 'permission-denied') {
+                    console.error('PERMISSION DENIED: Firestore security rules are blocking the delete operation');
+                    this.showError('Permission denied. Please check Firestore security rules.');
+                } else if (error.code === 'unavailable') {
+                    console.error('FIRESTORE UNAVAILABLE: Network or service issue');
+                    this.showError('Firestore service unavailable. Check your internet connection.');
+                } else {
+                    this.showError(`Failed to delete mobile: ${error.message}`);
+                }
+                
+                // Temporary fallback: delete from local inventory only
+                console.log('Attempting local-only deletion as fallback...');
+                const beforeLength = this.inventory.length;
+                this.inventory = this.inventory.filter(mobile => mobile.id !== id);
+                const afterLength = this.inventory.length;
+                
+                if (beforeLength > afterLength) {
+                    console.log('Local deletion successful');
+                    this.displayInventory();
+                    this.updateInventoryCount();
+                    this.showError('Deleted locally only. Firestore deletion failed - check console for details.');
+                } else {
+                    console.log('Local deletion also failed');
+                }
             }
+        } else {
+            console.log('Delete cancelled by user'); // Debug log
         }
     }
 
@@ -382,6 +456,7 @@ class MobileInventoryManager {
 
     // Create mobile card HTML
     createMobileCard(mobile) {
+        console.log('Creating card for mobile:', mobile.brand, mobile.model, 'with ID:', mobile.id); // Debug log
         const isSold = mobile.sold || false;
         const cardClass = isSold ? 'bg-gray-100 border-gray-300 opacity-75' : 'bg-gray-50 border-gray-200';
         
@@ -575,24 +650,45 @@ class MobileInventoryManager {
         // Delete buttons
         inventoryList.querySelectorAll('.delete-btn').forEach(btn => {
             btn.addEventListener('click', async (e) => {
-                const id = e.target.dataset.id; // Use string ID for Firestore
-                await this.deleteMobile(id);
+                e.preventDefault();
+                e.stopPropagation();
+                const id = e.currentTarget.dataset.id; // Use currentTarget to get the button element
+                console.log('Delete button clicked, ID:', id); // Debug log
+                if (id) {
+                    await this.deleteMobile(id);
+                } else {
+                    console.error('No ID found for delete button');
+                }
             });
         });
 
         // Edit buttons
         inventoryList.querySelectorAll('.edit-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                const id = e.target.dataset.id; // Use string ID for Firestore
-                this.editMobile(id);
+                e.preventDefault();
+                e.stopPropagation();
+                const id = e.currentTarget.dataset.id; // Use currentTarget to get the button element
+                console.log('Edit button clicked, ID:', id); // Debug log
+                if (id) {
+                    this.editMobile(id);
+                } else {
+                    console.error('No ID found for edit button');
+                }
             });
         });
 
         // Mark as sold buttons
         inventoryList.querySelectorAll('.sold-btn').forEach(btn => {
             btn.addEventListener('click', async (e) => {
-                const id = e.target.dataset.id; // Use string ID for Firestore
-                await this.markAsSold(id);
+                e.preventDefault();
+                e.stopPropagation();
+                const id = e.currentTarget.dataset.id; // Use currentTarget to get the button element
+                console.log('Sold button clicked, ID:', id); // Debug log
+                if (id) {
+                    await this.markAsSold(id);
+                } else {
+                    console.error('No ID found for sold button');
+                }
             });
         });
     }
@@ -1015,4 +1111,4 @@ class MobileInventoryManager {
 // Initialize the app when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
     new MobileInventoryManager();
-}); 
+});

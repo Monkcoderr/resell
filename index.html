@@ -246,8 +246,8 @@
     
     <!-- PWA Service Worker Registration -->
     <script>
-        // Register service worker for PWA functionality
-        if ('serviceWorker' in navigator) {
+        // Register service worker for PWA functionality (only works on HTTPS/localhost)
+        if ('serviceWorker' in navigator && window.location.protocol !== 'file:') {
             window.addEventListener('load', function() {
                 navigator.serviceWorker.register('service-worker.js')
                     .then(function(registration) {
@@ -257,6 +257,8 @@
                         console.log('ServiceWorker registration failed: ', err);
                     });
             });
+        } else if (window.location.protocol === 'file:') {
+            console.log('ServiceWorker not supported with file:// protocol');
         }
 
         // Check for PWA install prompt
