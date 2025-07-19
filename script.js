@@ -114,7 +114,8 @@ class MobileInventoryManager {
             model: formData.get('model').trim(),
             imei: formData.get('imei').trim(),
             ram: formData.get('ram'),
-            storage: formData.get('storage')
+            storage: formData.get('storage'),
+            price: parseFloat(formData.get('price'))
         };
 
         // Validate IMEI
@@ -177,6 +178,47 @@ class MobileInventoryManager {
         return this.inventory.some(mobile => mobile.imei === imei);
     }
 
+    // Generate unique 6-digit Tag ID
+    generateUniqueTagId() {
+        let tagId;
+        let attempts = 0;
+        const maxAttempts = 1000; // Prevent infinite loop
+        
+        do {
+            // Generate random 6-digit number (100000 to 999999)
+            tagId = Math.floor(Math.random() * 900000) + 100000;
+            attempts++;
+        } while (this.isTagIdExists(tagId) && attempts < maxAttempts);
+        
+        if (attempts >= maxAttempts) {
+            // Fallback: sequential number if too many collisions
+            tagId = this.getNextSequentialTagId();
+        }
+        
+        return tagId.toString();
+    }
+
+    // Check if Tag ID already exists
+    isTagIdExists(tagId) {
+        return this.inventory.some(mobile => mobile.tagId === tagId.toString());
+    }
+
+    // Get next sequential Tag ID as fallback
+    getNextSequentialTagId() {
+        let maxTagId = 100000; // Start from 100000
+        
+        this.inventory.forEach(mobile => {
+            if (mobile.tagId) {
+                const numTagId = parseInt(mobile.tagId);
+                if (!isNaN(numTagId) && numTagId >= maxTagId) {
+                    maxTagId = numTagId + 1;
+                }
+            }
+        });
+        
+        return maxTagId;
+    }
+
     // Process image file to base64
     processImage(file) {
         return new Promise((resolve, reject) => {
@@ -201,6 +243,7 @@ class MobileInventoryManager {
     addMobile(mobileData) {
         const mobile = {
             id: Date.now(), // Simple ID generation using timestamp
+            tagId: this.generateUniqueTagId(), // Auto-generate unique Tag ID
             ...mobileData
         };
 
@@ -233,7 +276,8 @@ class MobileInventoryManager {
             filteredInventory = this.inventory.filter(mobile => 
                 mobile.brand.toLowerCase().includes(searchTerm) ||
                 mobile.model.toLowerCase().includes(searchTerm) ||
-                mobile.imei.includes(searchTerm)
+                mobile.imei.includes(searchTerm) ||
+                (mobile.tagId && mobile.tagId.includes(searchTerm))
             );
         }
 
@@ -315,6 +359,12 @@ class MobileInventoryManager {
                     <div class="bg-white p-2 rounded border text-sm">
                         <span class="text-gray-500">Storage:</span>
                         <span class="font-semibold ml-2">${mobile.storage}</span>
+                    </div>
+                    <div class="bg-green-50 p-2 rounded border border-green-200 text-sm">
+                        <span class="text-green-600 font-semibold">Price: ₹${mobile.price ? mobile.price.toFixed(2) : 'N/A'}</span>
+                    </div>
+                    <div class="bg-blue-50 p-2 rounded border border-blue-200 text-sm">
+                        <span class="text-blue-600 font-semibold">Tag ID: ${mobile.tagId || 'N/A'}</span>
                     </div>
                 </div>
             </div>
@@ -441,6 +491,15 @@ class MobileInventoryManager {
         document.getElementById('imei').disabled = true; // Disable IMEI editing
         document.getElementById('ram').value = mobile.ram;
         document.getElementById('storage').value = mobile.storage;
+        document.getElementById('price').value = mobile.price || '';
+
+        // Show Tag ID in edit mode
+        const tagIdDisplay = document.getElementById('tagIdDisplay');
+        const tagIdValue = document.getElementById('tagIdValue');
+        if (mobile.tagId) {
+            tagIdValue.textContent = mobile.tagId;
+            tagIdDisplay.classList.remove('hidden');
+        }
 
         // Handle image preview if exists
         if (mobile.image) {
@@ -498,6 +557,10 @@ class MobileInventoryManager {
         
         // Reset IMEI field
         document.getElementById('imei').disabled = false;
+        
+        // Hide Tag ID display
+        const tagIdDisplay = document.getElementById('tagIdDisplay');
+        tagIdDisplay.classList.add('hidden');
         
         // Reset button styles
         const submitBtn = document.getElementById('submitBtn');
@@ -558,11 +621,13 @@ class MobileInventoryManager {
             // Prepare data for Excel (remove image data for cleaner output)
             const excelData = this.inventory.map((mobile, index) => ({
                 'No.': index + 1,
+                'Tag ID': mobile.tagId || 'N/A',
                 'Brand': mobile.brand,
                 'Model': mobile.model,
                 'IMEI': mobile.imei,
                 'RAM': mobile.ram,
                 'Storage': mobile.storage,
+                'Price (₹)': mobile.price ? mobile.price.toFixed(2) : 'N/A',
                 'Status': mobile.sold ? 'SOLD' : 'AVAILABLE',
                 'Has Image': mobile.image ? 'Yes' : 'No',
                 'Date Added': new Date(mobile.id).toLocaleDateString()
@@ -574,11 +639,13 @@ class MobileInventoryManager {
             // Set column widths for better formatting
             const columnWidths = [
                 { wch: 5 },   // No.
+                { wch: 10 },  // Tag ID
                 { wch: 15 },  // Brand
                 { wch: 20 },  // Model
                 { wch: 18 },  // IMEI
                 { wch: 8 },   // RAM
                 { wch: 10 },  // Storage
+                { wch: 12 },  // Price (₹)
                 { wch: 12 },  // Status
                 { wch: 12 },  // Has Image
                 { wch: 15 }   // Date Added
@@ -606,151 +673,181 @@ class MobileInventoryManager {
             const testMobiles = [
                 {
                     id: Date.now() + 1,
+                    tagId: '123456',
                     brand: 'Samsung',
                     model: 'Galaxy A54',
                     imei: '123456789012345',
                     ram: '8GB',
                     storage: '128GB',
+                    price: 28999,
                     image: null,
                     sold: false
                 },
                 {
                     id: Date.now() + 2,
+                    tagId: '234567',
                     brand: 'Apple',
                     model: 'iPhone 13',
                     imei: '234567890123456',
                     ram: '4GB',
                     storage: '128GB',
+                    price: 54999,
                     image: null,
                     sold: true
                 },
                 {
                     id: Date.now() + 3,
+                    tagId: '345678',
                     brand: 'Xiaomi',
                     model: 'Redmi Note 12',
                     imei: '345678901234567',
                     ram: '6GB',
                     storage: '128GB',
+                    price: 16999,
                     image: null,
                     sold: false
                 },
                 {
                     id: Date.now() + 4,
+                    tagId: '456789',
                     brand: 'OnePlus',
                     model: 'Nord CE 3',
                     imei: '456789012345678',
                     ram: '8GB',
                     storage: '128GB',
+                    price: 24999,
                     image: null,
                     sold: false
                 },
                 {
                     id: Date.now() + 5,
+                    tagId: '567890',
                     brand: 'Google',
                     model: 'Pixel 7a',
                     imei: '567890123456789',
                     ram: '8GB',
                     storage: '128GB',
+                    price: 37999,
                     image: null,
                     sold: true
                 },
                 {
                     id: Date.now() + 6,
+                    tagId: '678901',
                     brand: 'Samsung',
                     model: 'Galaxy S22',
                     imei: '678901234567890',
                     ram: '8GB',
                     storage: '256GB',
+                    price: 58999,
                     image: null,
                     sold: false
                 },
                 {
                     id: Date.now() + 7,
+                    tagId: '789012',
                     brand: 'Apple',
                     model: 'iPhone 12',
                     imei: '789012345678901',
                     ram: '4GB',
                     storage: '64GB',
+                    price: 41999,
                     image: null,
                     sold: false
                 },
                 {
                     id: Date.now() + 8,
+                    tagId: '890123',
                     brand: 'Realme',
                     model: 'GT Neo 3',
                     imei: '890123456789012',
                     ram: '8GB',
                     storage: '128GB',
+                    price: 23499,
                     image: null,
                     sold: true
                 },
                 {
                     id: Date.now() + 9,
+                    tagId: '901234',
                     brand: 'Vivo',
                     model: 'V27 Pro',
                     imei: '901234567890123',
                     ram: '8GB',
                     storage: '256GB',
+                    price: 32999,
                     image: null,
                     sold: false
                 },
                 {
                     id: Date.now() + 10,
+                    tagId: '123457',
                     brand: 'Oppo',
                     model: 'Reno 8',
                     imei: '012345678901234',
                     ram: '8GB',
                     storage: '128GB',
+                    price: 27999,
                     image: null,
                     sold: false
                 },
                 {
                     id: Date.now() + 11,
+                    tagId: '234568',
                     brand: 'Apple',
                     model: 'iPhone 14',
                     imei: '112345678901234',
                     ram: '6GB',
                     storage: '128GB',
+                    price: 62999,
                     image: null,
                     sold: true
                 },
                 {
                     id: Date.now() + 12,
+                    tagId: '345679',
                     brand: 'Samsung',
                     model: 'Galaxy A34',
                     imei: '212345678901234',
                     ram: '6GB',
                     storage: '128GB',
+                    price: 24499,
                     image: null,
                     sold: false
                 },
                 {
                     id: Date.now() + 13,
+                    tagId: '456790',
                     brand: 'Xiaomi',
                     model: 'Mi 11',
                     imei: '312345678901234',
                     ram: '8GB',
                     storage: '256GB',
+                    price: 33999,
                     image: null,
                     sold: false
                 },
                 {
                     id: Date.now() + 14,
+                    tagId: '567891',
                     brand: 'Motorola',
                     model: 'Edge 30',
                     imei: '412345678901234',
                     ram: '8GB',
                     storage: '128GB',
+                    price: 20999,
                     image: null,
                     sold: false
                 },
                 {
                     id: Date.now() + 15,
+                    tagId: '678902',
                     brand: 'Nothing',
                     model: 'Phone (2)',
                     imei: '512345678901234',
                     ram: '12GB',
                     storage: '256GB',
+                    price: 50999,
                     image: null,
                     sold: true
                 }
